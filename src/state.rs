@@ -24,6 +24,10 @@ pub enum Action {
         path: PathBuf,
         target: PathBuf,
     },
+    Copy {
+        path: PathBuf,
+        target: PathBuf,
+    },
     Mcp {
         path: PathBuf,
         names: Vec<String>,
