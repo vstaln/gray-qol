@@ -1,6 +1,6 @@
 [package]
 name = "gray-qol"
-version = "0.1.0"
+version = "0.1.2"
 edition = "2024"
 license = "MIT"
 description = "Detect other agent tools, import their setup, and update everything for the gray agent harness"
