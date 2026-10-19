@@ -283,6 +283,67 @@ fn merge_mcp(servers: &[(String, Value)]) -> std::io::Result<Action> {
     })
 }
 
+#[cfg(unix)]
+fn link_skill(target: &Path, path: &Path) -> std::io::Result<Action> {
+    std::os::unix::fs::symlink(target, path)?;
+    Ok(Action::Symlink {
+        path: path.to_path_buf(),
+        target: target.to_path_buf(),
+    })
+}
+
+// Windows symlinks need Developer Mode or elevation; without them, copy the
+// skill directory instead — same installed result, recorded so undo removes
+// only a directory this setup created.
+#[cfg(windows)]
+fn link_skill(target: &Path, path: &Path) -> std::io::Result<Action> {
+    if target.is_dir() {
+        match std::os::windows::fs::symlink_dir(target, path) {
+            Ok(()) => {
+                return Ok(Action::Symlink {
+                    path: path.to_path_buf(),
+                    target: target.to_path_buf(),
+                });
+            }
+            Err(_) => {
+                copy_dir_all(target, path)?;
+                return Ok(Action::Copy {
+                    path: path.to_path_buf(),
+                    target: target.to_path_buf(),
+                });
+            }
+        }
+    }
+    match std::os::windows::fs::symlink_file(target, path) {
+        Ok(()) => Ok(Action::Symlink {
+            path: path.to_path_buf(),
+            target: target.to_path_buf(),
+        }),
+        Err(_) => {
+            std::fs::copy(target, path)?;
+            Ok(Action::Copy {
+                path: path.to_path_buf(),
+                target: target.to_path_buf(),
+            })
+        }
+    }
+}
+
+#[cfg(windows)]
+fn copy_dir_all(src: &Path, dst: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dst)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let dest = dst.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            copy_dir_all(&entry.path(), &dest)?;
+        } else {
+            std::fs::copy(entry.path(), &dest)?;
+        }
+    }
+    Ok(())
+}
+
 fn apply(host: &Host, items: Vec<Item>) -> (Vec<Action>, Vec<String>) {
     let mut actions = Vec::new();
     let mut lines = Vec::new();
@@ -309,10 +370,10 @@ fn apply(host: &Host, items: Vec<Item>) -> (Vec<Action>, Vec<String>) {
                 let mut ok = 0;
                 for (name, target) in links {
                     let path = dir.join(&name);
-                    match std::os::unix::fs::symlink(&target, &path) {
-                        Ok(()) => {
+                    match link_skill(&target, &path) {
+                        Ok(a) => {
                             ok += 1;
-                            actions.push(Action::Symlink { path, target });
+                            actions.push(a);
                         }
                         Err(e) => lines.push(format!("✗ skill {name}: {e}")),
                     }
@@ -603,6 +664,20 @@ fn revert(a: &Action) -> Result<String, String> {
             )),
             Err(_) => Ok(format!("{} already gone", paths::tilde(path))),
         },
+        Action::Copy { path, target } => {
+            let _ = target;
+            if path.is_dir() && path.join("SKILL.md").is_file() {
+                std::fs::remove_dir_all(path)
+                    .map(|()| format!("removed {}", paths::tilde(path)))
+                    .map_err(|e| e.to_string())
+            } else if path.is_file() {
+                std::fs::remove_file(path)
+                    .map(|()| format!("removed {}", paths::tilde(path)))
+                    .map_err(|e| e.to_string())
+            } else {
+                Ok(format!("{} already gone", paths::tilde(path)))
+            }
+        }
         Action::Mcp {
             path,
             names,

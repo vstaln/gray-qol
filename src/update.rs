@@ -256,6 +256,7 @@ fn npm_version(resolved: &Path) -> Option<String> {
         .and_then(|v| v["version"].as_str().map(str::to_string))
 }
 
+#[cfg(unix)]
 fn uid() -> Option<u32> {
     std::fs::read_to_string("/proc/self/status")
         .ok()?
@@ -267,6 +268,7 @@ fn uid() -> Option<u32> {
         .ok()
 }
 
+#[cfg(unix)]
 fn writable(dir: &Path) -> bool {
     use std::os::unix::fs::MetadataExt;
     let Ok(m) = std::fs::metadata(dir) else {
@@ -276,6 +278,22 @@ fn writable(dir: &Path) -> bool {
         Some(0) => true,
         Some(u) if m.uid() == u => m.mode() & 0o200 != 0,
         _ => m.mode() & 0o002 != 0,
+    }
+}
+
+// Windows has no uid/mode answer to "can I write here" — create a probe.
+#[cfg(not(unix))]
+fn writable(dir: &Path) -> bool {
+    if !dir.is_dir() {
+        return false;
+    }
+    let probe = dir.join(format!(".qol-wtest-{}", std::process::id()));
+    match std::fs::File::create(&probe) {
+        Ok(_) => {
+            let _ = std::fs::remove_file(&probe);
+            true
+        }
+        Err(_) => false,
     }
 }
 
