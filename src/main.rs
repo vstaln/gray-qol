@@ -1,5 +1,6 @@
 mod detect;
 mod host;
+mod mascot;
 mod paths;
 mod setup;
 mod sources;
@@ -33,7 +34,7 @@ fn manifest() -> Value {
         "protocol": PROTOCOL,
         "description": "Detect other agent tools, import their setup, update everything",
         "tools": [],
-        "commands": [COMMAND, "/setup"],
+        "commands": [COMMAND, "/setup", "/hehe"],
         "hooks": ["session_start"],
         "first_run": true,
         "capabilities": ["host.say", "host.ask", "plugins.manage", "host.sessions", "host.restart"],
@@ -67,6 +68,12 @@ fn command_run(host: &Host, params: &Value) -> Value {
         .and_then(Value::as_str)
         .unwrap_or(COMMAND);
     let argv = argv_of(params);
+    if name == "/hehe" {
+        return json!({
+            "terminal": ["hehe"],
+            "text": "graychan needs a terminal — run /qol first-run or `gray qol hehe` outside gray",
+        });
+    }
     if name == "/setup" {
         // Same verb surface as the old core /setup: [tool] imports,
         // undo/dismiss/scanned manage the log.
@@ -171,6 +178,11 @@ fn main() {
         Some("manifest") => println!("{}", manifest()),
         Some("sidecar") => sidecar(),
         Some("update") => update::cli(),
+        Some("hehe") => {
+            if !mascot::print_mascot() {
+                println!("graychan needs a terminal (20x10+) and a little color");
+            }
+        }
         Some("scanned") => {
             println!(
                 "{}",
