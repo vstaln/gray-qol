@@ -33,7 +33,7 @@ fn manifest() -> Value {
         "protocol": PROTOCOL,
         "description": "Detect other agent tools, import their setup, update everything",
         "tools": [],
-        "commands": [COMMAND],
+        "commands": [COMMAND, "/setup"],
         "hooks": ["session_start"],
         "first_run": true,
         "capabilities": ["host.say", "host.ask", "plugins.manage", "host.sessions", "host.restart"],
@@ -67,6 +67,22 @@ fn command_run(host: &Host, params: &Value) -> Value {
         .and_then(Value::as_str)
         .unwrap_or(COMMAND);
     let argv = argv_of(params);
+    if name == "/setup" {
+        // Same verb surface as the old core /setup: [tool] imports,
+        // undo/dismiss/scanned manage the log.
+        let words: Vec<&str> = argv.iter().map(String::as_str).collect();
+        return match words.as_slice() {
+            ["undo"] => setup::undo(1),
+            ["undo", n] => match n.parse::<usize>() {
+                Ok(n) if n > 0 => setup::undo(n),
+                _ => json!({"text": "usage: /setup undo [n]"}),
+            },
+            ["dismiss", tool] => setup::dismiss(tool),
+            ["dismiss"] => json!({"text": "usage: /setup dismiss <tool>"}),
+            ["scanned"] => detect::scanned_report(),
+            _ => setup::command(host, words.first().copied()),
+        };
+    }
     let session = params["session"]["id"].as_str().unwrap_or("").to_string();
     let words: Vec<&str> = argv.iter().map(String::as_str).collect();
     if name == "/update" {
@@ -154,6 +170,7 @@ fn main() {
     match args.first().map(String::as_str) {
         Some("manifest") => println!("{}", manifest()),
         Some("sidecar") => sidecar(),
+        Some("update") => update::cli(),
         Some("scanned") => {
             println!(
                 "{}",

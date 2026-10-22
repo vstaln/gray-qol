@@ -464,7 +464,87 @@ fn log(path: &Path, title: &str, out: &Out) {
     }
 }
 
+/// Where an update flow gets its prompts: the live sidecar (ask/restart)
+/// or a plain terminal (`gray qol update`, `gray update --everything`).
+trait Up {
+    fn sessions(&self) -> Option<usize>;
+    fn ask(&self, questions: &[Value], plan: &[String]) -> Result<Value, String>;
+    fn say(&self, text: &str);
+    /// `Some` when the host can restart gray itself; `None` leaves the
+    /// "restart gray" hint to the caller.
+    fn restart(&self, resume: bool) -> Option<Result<(), String>>;
+}
+
+struct Sidecar<'a> {
+    host: &'a Host,
+    session: &'a str,
+}
+
+impl Up for Sidecar<'_> {
+    fn sessions(&self) -> Option<usize> {
+        running_sessions(self.host, self.session)
+    }
+    fn ask(&self, questions: &[Value], _plan: &[String]) -> Result<Value, String> {
+        self.host.ask(Value::Array(questions.to_vec()))
+    }
+    fn say(&self, text: &str) {
+        self.host.say(text);
+    }
+    fn restart(&self, resume: bool) -> Option<Result<(), String>> {
+        Some(
+            self.host
+                .call("host/restart", json!({"resume": resume}), host::HOST_TTL)
+                .map(|_| ()),
+        )
+    }
+}
+
+struct Tty;
+
+impl Up for Tty {
+    fn sessions(&self) -> Option<usize> {
+        None
+    }
+    fn ask(&self, questions: &[Value], plan: &[String]) -> Result<Value, String> {
+        use std::io::Write as _;
+        if let Some(q) = questions.first() {
+            println!("{}", q["question"].as_str().unwrap_or("Update everything?"));
+        } else {
+            println!("{}", plan.join("\n"));
+        }
+        print!("apply these updates? [y/N] ");
+        let _ = std::io::stdout().flush();
+        let mut buf = String::new();
+        if std::io::stdin().read_line(&mut buf).unwrap_or(0) == 0 {
+            return Err("no stdin".into());
+        }
+        if matches!(buf.trim(), "y" | "Y" | "yes" | "YES") {
+            Ok(json!({"answers": {"confirm": {"selected": ["Update"]}}}))
+        } else {
+            Ok(json!({"answers": {"confirm": {"selected": ["Cancel"]}}}))
+        }
+    }
+    fn say(&self, text: &str) {
+        println!("{text}");
+    }
+    fn restart(&self, _resume: bool) -> Option<Result<(), String>> {
+        None
+    }
+}
+
 pub fn run(host: &Host, session: &str) -> Value {
+    run_inner(&Sidecar { host, session })
+}
+
+/// `gray-qol update` on a real terminal — no sidecar: plans, asks on
+/// stdin, applies via the same subprocesses, and leaves restarting to
+/// the user.
+pub fn cli() {
+    let v = run_inner(&Tty);
+    println!("{}", v["text"].as_str().unwrap_or(""));
+}
+
+fn run_inner(up: &dyn Up) -> Value {
     let gray = std::thread::spawn(gray_check);
     let plugins = std::thread::spawn(plugin_check);
     let clis: Vec<_> = PROVIDER_CLIS
@@ -481,7 +561,7 @@ pub fn run(host: &Host, session: &str) -> Value {
         .into_iter()
         .filter_map(|h| h.join().ok().flatten())
         .collect();
-    let sessions = running_sessions(host, session);
+    let sessions = up.sessions();
 
     let mut lines = Vec::new();
     let mut current = Vec::new();
@@ -589,7 +669,7 @@ pub fn run(host: &Host, session: &str) -> Value {
             "default_all": true,
         }));
     }
-    let answer = match host.ask(Value::Array(questions)) {
+    let answer = match up.ask(&questions, &lines) {
         Ok(a) => a,
         Err(e) => {
             return json!({"text": format!("/qol update needs an interactive session ({e}). Pending:\n{}", lines.join("\n"))});
@@ -656,13 +736,20 @@ pub fn run(host: &Host, session: &str) -> Value {
     let mut text = results.join("\n");
     if restart && !gray_failed {
         text.push_str(&format!(
-            "\nrestarting{}…",
-            if resume { " and resuming" } else { "" }
+            "\n{}",
+            if up.restart(true).is_none() {
+                "updated".to_string()
+            } else if resume {
+                "restarting and resuming…".to_string()
+            } else {
+                "restarting…".to_string()
+            }
         ));
-        host.say(&text);
-        match host.call("host/restart", json!({"resume": resume}), host::HOST_TTL) {
-            Ok(_) => {}
-            Err(e) => text.push_str(&format!("\n✗ restart: {e} — run /restart")),
+        up.say(&text);
+        match up.restart(resume) {
+            Some(Ok(())) => {}
+            Some(Err(e)) => text.push_str(&format!("\n✗ restart: {e} — run /restart")),
+            None => text.push_str("\nrestart gray to run the new build"),
         }
     } else if restart {
         text.push_str("\nnot restarting after a failure; see the log, then /restart");
