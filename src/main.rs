@@ -1,10 +1,14 @@
+mod copy;
 mod detect;
 mod host;
+mod hotkeys;
+mod intro;
 mod paths;
 mod setup;
 mod sources;
 mod state;
 mod update;
+mod usage;
 
 use std::io::{BufRead, IsTerminal};
 use std::sync::Arc;
@@ -33,8 +37,9 @@ fn manifest() -> Value {
         "protocol": PROTOCOL,
         "description": "Detect other agent tools, import their setup, update everything",
         "tools": [],
-        "commands": [COMMAND, "/setup"],
-        "hooks": ["session_start"],
+        "commands": [COMMAND, "/setup", "/usage", "/cost", "/copy", "/hotkeys", "/intro"],
+        "turn_local": {"/usage": ["*"], "/cost": ["*"], "/copy": ["*"], "/hotkeys": ["*"], "/intro": ["*"], "/qol": ["scanned"]},
+        "hooks": ["session_start", "turn_end"],
         "first_run": true,
         "capabilities": ["host.say", "host.ask", "plugins.manage", "host.sessions", "host.restart"],
         "completion": ["setup", "undo", "dismiss", "scanned", "update", "first-run"],
@@ -85,6 +90,13 @@ fn command_run(host: &Host, params: &Value) -> Value {
     }
     let session = params["session"]["id"].as_str().unwrap_or("").to_string();
     let words: Vec<&str> = argv.iter().map(String::as_str).collect();
+    match name {
+        "/usage" | "/cost" => return usage::usage_command(&argv),
+        "/copy" => return copy::copy_command(&session),
+        "/hotkeys" => return hotkeys::hotkeys_command(&argv),
+        "/intro" => return intro::intro_command(&argv),
+        _ => {}
+    }
     if name == "/update" {
         return match words.first() {
             Some(&"everything") => update::run(host, &session),
@@ -109,13 +121,19 @@ fn command_run(host: &Host, params: &Value) -> Value {
 }
 
 fn on_event(host: &Host, params: &Value) {
-    if params.get("type").and_then(Value::as_str) != Some("session_start") {
-        return;
+    match params.get("type").and_then(Value::as_str) {
+        Some("session_start") => {
+            if params.get("interactive").and_then(Value::as_bool) == Some(false) {
+                return;
+            }
+            detect::notify(host);
+        }
+        Some("turn_end") => {
+            let sid = params["session"]["id"].as_str().unwrap_or("");
+            usage::record_turn(sid, &params["usage"]);
+        }
+        _ => {}
     }
-    if params.get("interactive").and_then(Value::as_bool) == Some(false) {
-        return;
-    }
-    detect::notify(host);
 }
 
 fn handle(host: &Host, id: Value, method: &str, params: &Value) -> Value {
@@ -131,6 +149,7 @@ fn handle(host: &Host, id: Value, method: &str, params: &Value) -> Value {
 
 fn sidecar() {
     let host = Arc::new(Host::new());
+    let mut workers: Vec<std::thread::JoinHandle<()>> = Vec::new();
     let stdin = std::io::stdin();
     for line in stdin.lock().lines() {
         let Ok(line) = line else { break };
@@ -151,18 +170,22 @@ fn sidecar() {
         let Some(id) = v.get("id").cloned() else {
             if method == "event/notify" {
                 let host = host.clone();
-                std::thread::spawn(move || on_event(&host, &params));
+                workers.push(std::thread::spawn(move || on_event(&host, &params)));
             }
             continue;
         };
         let method = method.to_string();
         let host = host.clone();
-        std::thread::spawn(move || {
+        workers.push(std::thread::spawn(move || {
             let reply = handle(&host, id, &method, &params);
             host.write(&reply);
-        });
+        }));
     }
-    std::process::exit(0);
+    // stdin closed — let in-flight workers finish their replies before
+    // exit, or a fast harness (tests, conformance probes) loses them.
+    for w in workers {
+        let _ = w.join();
+    }
 }
 
 fn main() {
@@ -171,6 +194,13 @@ fn main() {
         Some("manifest") => println!("{}", manifest()),
         Some("sidecar") => sidecar(),
         Some("update") => update::cli(),
+        Some("usage") | Some("cost") => {
+            let _ = args;
+            println!("{}", usage::usage_command(&args[1..].to_vec())["text"].as_str().unwrap_or(""));
+        }
+        Some("copy") => println!("{}", copy::copy_command("")["text"].as_str().unwrap_or("")),
+        Some("hotkeys") => println!("{}", hotkeys::hotkeys_command(&args[1..].to_vec())["text"].as_str().unwrap_or("")),
+        Some("intro") => println!("{}", intro::intro_command(&args[1..].to_vec())["text"].as_str().unwrap_or("")),
         Some("scanned") => {
             println!(
                 "{}",
