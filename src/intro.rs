@@ -1,7 +1,7 @@
 //! /intro — the logo-intro toggle. The flag lives in config.json's `"intro"`
 //! field (the same one core's composer reads); this plugin owns the verb.
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::paths::gray_home;
 
