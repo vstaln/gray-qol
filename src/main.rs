@@ -17,7 +17,7 @@ use serde_json::{Value, json};
 
 use host::Host;
 
-pub const PLUGIN_NAME: &str = "qol";
+pub const PLUGIN_NAME: &str = "quality-of-life";
 pub const PROTOCOL: &str = "1.1";
 pub const COMMAND: &str = "/qol";
 
