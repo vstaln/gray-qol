@@ -17,7 +17,7 @@ use serde_json::{Value, json};
 
 use host::Host;
 
-pub const PLUGIN_NAME: &str = "qol";
+pub const PLUGIN_NAME: &str = "quality-of-life";
 pub const PROTOCOL: &str = "1.1";
 pub const COMMAND: &str = "/qol";
 
@@ -196,11 +196,26 @@ fn main() {
         Some("update") => update::cli(),
         Some("usage") | Some("cost") => {
             let _ = args;
-            println!("{}", usage::usage_command(&args[1..].to_vec())["text"].as_str().unwrap_or(""));
+            println!(
+                "{}",
+                usage::usage_command(&args[1..].to_vec())["text"]
+                    .as_str()
+                    .unwrap_or("")
+            );
         }
         Some("copy") => println!("{}", copy::copy_command("")["text"].as_str().unwrap_or("")),
-        Some("hotkeys") => println!("{}", hotkeys::hotkeys_command(&args[1..].to_vec())["text"].as_str().unwrap_or("")),
-        Some("intro") => println!("{}", intro::intro_command(&args[1..].to_vec())["text"].as_str().unwrap_or("")),
+        Some("hotkeys") => println!(
+            "{}",
+            hotkeys::hotkeys_command(&args[1..].to_vec())["text"]
+                .as_str()
+                .unwrap_or("")
+        ),
+        Some("intro") => println!(
+            "{}",
+            intro::intro_command(&args[1..].to_vec())["text"]
+                .as_str()
+                .unwrap_or("")
+        ),
         Some("scanned") => {
             println!(
                 "{}",

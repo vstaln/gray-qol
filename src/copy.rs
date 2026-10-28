@@ -3,7 +3,7 @@
 //! the same text, so the plugin reads `sessions/<sid>.jsonl` (sid arrives in
 //! command/run params.session.id; newest file is the fallback).
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::paths::gray_home;
 
@@ -20,7 +20,10 @@ fn last_assistant_text(path: &std::path::Path) -> Option<String> {
         let text: String = v["message"]["content"]
             .as_array()?
             .iter()
-            .filter_map(|b| (b["type"].as_str() == Some("text")).then(|| b["text"].as_str().unwrap_or("").to_string()))
+            .filter_map(|b| {
+                (b["type"].as_str() == Some("text"))
+                    .then(|| b["text"].as_str().unwrap_or("").to_string())
+            })
             .collect::<Vec<_>>()
             .join("\n");
         (!text.trim().is_empty()).then(|| text.trim().to_string())

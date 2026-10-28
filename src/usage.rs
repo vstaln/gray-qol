@@ -4,7 +4,7 @@
 //! `turn_end` live accumulator into `~/.gray/usage/live/<sid>.json`.
 
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -24,7 +24,9 @@ pub fn usage_command(argv: &[String]) -> Value {
             let _ = std::fs::remove_dir_all(gray_home().join("usage").join("live"));
             json!({"text": "usage: live counters cleared"})
         }
-        Some(_) => json!({"text": "usage: /usage [all|reset] — per-session tokens+cost, live counters, provider balances"}),
+        Some(_) => {
+            json!({"text": "usage: /usage [all|reset] — per-session tokens+cost, live counters, provider balances"})
+        }
     }
 }
 // ---------- rates (USD per million tokens; configurable, approximate) ----------
@@ -41,12 +43,54 @@ pub struct Rate {
 /// column as an estimate.
 fn builtin_rates() -> Vec<(&'static str, Rate)> {
     vec![
-        ("claude-opus", Rate { input: 15.0, output: 75.0, cache_read: 1.50 }),
-        ("claude-sonnet", Rate { input: 3.0, output: 15.0, cache_read: 0.30 }),
-        ("claude-haiku", Rate { input: 0.80, output: 4.0, cache_read: 0.08 }),
-        ("gpt-5", Rate { input: 1.25, output: 10.0, cache_read: 0.125 }),
-        ("grok-4", Rate { input: 3.0, output: 15.0, cache_read: 0.75 }),
-        ("grok-code", Rate { input: 1.50, output: 15.0, cache_read: 0.15 }),
+        (
+            "claude-opus",
+            Rate {
+                input: 15.0,
+                output: 75.0,
+                cache_read: 1.50,
+            },
+        ),
+        (
+            "claude-sonnet",
+            Rate {
+                input: 3.0,
+                output: 15.0,
+                cache_read: 0.30,
+            },
+        ),
+        (
+            "claude-haiku",
+            Rate {
+                input: 0.80,
+                output: 4.0,
+                cache_read: 0.08,
+            },
+        ),
+        (
+            "gpt-5",
+            Rate {
+                input: 1.25,
+                output: 10.0,
+                cache_read: 0.125,
+            },
+        ),
+        (
+            "grok-4",
+            Rate {
+                input: 3.0,
+                output: 15.0,
+                cache_read: 0.75,
+            },
+        ),
+        (
+            "grok-code",
+            Rate {
+                input: 1.50,
+                output: 15.0,
+                cache_read: 0.15,
+            },
+        ),
     ]
 }
 
@@ -153,7 +197,11 @@ pub fn scan_sessions(limit: Option<usize>) -> (Vec<SessionRow>, usize) {
     files.sort_by_key(|p| {
         std::fs::metadata(p)
             .and_then(|m| m.modified())
-            .map(|t| std::time::SystemTime::now().duration_since(t).unwrap_or_default())
+            .map(|t| {
+                std::time::SystemTime::now()
+                    .duration_since(t)
+                    .unwrap_or_default()
+            })
             .unwrap_or_default()
     });
     let total = files.len();
@@ -180,9 +228,18 @@ pub struct Live {
 fn live_path(sid: &str) -> PathBuf {
     let safe: String = sid
         .chars()
-        .map(|c| if c.is_alphanumeric() || c == '-' { c } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
-    gray_home().join("usage").join("live").join(format!("{safe}.json"))
+    gray_home()
+        .join("usage")
+        .join("live")
+        .join(format!("{safe}.json"))
 }
 
 /// Fold one `turn_end` usage into `~/.gray/usage/live/<sid>.json`.
@@ -216,7 +273,11 @@ fn live_rows() -> Vec<(String, Live)> {
             if let Ok(l) = std::fs::read_to_string(&p)
                 .and_then(|s| serde_json::from_str::<Live>(&s).map_err(|e| e.into()))
             {
-                let sid = p.file_stem().unwrap_or_default().to_string_lossy().into_owned();
+                let sid = p
+                    .file_stem()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .into_owned();
                 out.push((sid, l));
             }
         }
@@ -295,7 +356,10 @@ fn private_header_file(header: &str) -> Option<(std::path::PathBuf, String)> {
         use std::os::unix::fs::OpenOptionsExt;
         o.mode(0o600);
     }
-    match o.open(&path).and_then(|mut f| f.write_all(header.as_bytes())) {
+    match o
+        .open(&path)
+        .and_then(|mut f| f.write_all(header.as_bytes()))
+    {
         Ok(()) => Some((path.clone(), format!("@{}", path.display()))),
         Err(_) => {
             let _ = std::fs::remove_file(&path);
@@ -350,16 +414,27 @@ fn collect_balance_fields(v: &Value, path: &str, out: &mut Vec<String>) {
     match v {
         Value::Object(m) => {
             for (k, x) in m {
-                let p = if path.is_empty() { k.clone() } else { format!("{path}.{k}") };
+                let p = if path.is_empty() {
+                    k.clone()
+                } else {
+                    format!("{path}.{k}")
+                };
                 collect_balance_fields(x, &p, out);
             }
         }
         Value::Number(n) => {
             let leaf = path.rsplit('.').next().unwrap_or(path).to_lowercase();
             if out.len() < 6
-                && ["balance", "credit", "credits", "remaining", "amount", "usage"]
-                    .iter()
-                    .any(|w| leaf.contains(w))
+                && [
+                    "balance",
+                    "credit",
+                    "credits",
+                    "remaining",
+                    "amount",
+                    "usage",
+                ]
+                .iter()
+                .any(|w| leaf.contains(w))
             {
                 out.push(format!("{path}={n}"));
             }
@@ -390,7 +465,9 @@ pub fn report(all: bool) -> String {
     let (mut ti, mut to, mut tc, mut cost_sum, mut priced) = (0u64, 0u64, 0u64, 0.0, false);
     for r in &rows {
         let c = cost(&r.model, r.input, r.output, r.cache_read);
-        let cs = c.map(|x| format!("{x:>8.2}")).unwrap_or_else(|| "       -".to_string());
+        let cs = c
+            .map(|x| format!("{x:>8.2}"))
+            .unwrap_or_else(|| "       -".to_string());
         if let Some(x) = c {
             cost_sum += x;
             priced = true;
@@ -416,7 +493,11 @@ pub fn report(all: bool) -> String {
         fmt_num(ti),
         fmt_num(to),
         fmt_num(tc),
-        if priced { format!("{cost_sum:.2}") } else { "-".into() },
+        if priced {
+            format!("{cost_sum:.2}")
+        } else {
+            "-".into()
+        },
     ));
     let live = live_rows();
     if !live.is_empty() {
@@ -446,4 +527,3 @@ pub fn report(all: bool) -> String {
     }
     out
 }
-
