@@ -57,6 +57,12 @@ const ROWS: &[Row] = &[
         kind: Kind::Bool(true),
     },
     Row {
+        key: "usage_warnings",
+        label: "Warn at 75%, 90% and 95% of a usage limit",
+        short: "Usage warnings",
+        kind: Kind::Bool(true),
+    },
+    Row {
         key: "notify_on_finish",
         label: "Notify when a turn finishes while you're away",
         short: "Notify when done",

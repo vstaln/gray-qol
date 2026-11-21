@@ -22,6 +22,7 @@ mod templates;
 mod title;
 mod update;
 mod usage;
+mod usage_warn;
 
 use std::io::{BufRead, IsTerminal};
 use std::sync::Arc;
@@ -230,7 +231,7 @@ fn on_event(host: &Arc<Host>, params: &Value) {
             sessions::refresh(host, params);
             auto_continue::turn_end(host, params);
             notify::turn_end(host, params);
-            for worker in [title::turn_end, suggest::turn_end] {
+            for worker in [title::turn_end, suggest::turn_end, usage_warn::turn_end] {
                 let host = Arc::clone(host);
                 let params = params.clone();
                 let _ = std::thread::spawn(move || worker(&host, &params));
